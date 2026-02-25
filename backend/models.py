@@ -1,7 +1,7 @@
 # models
 
 # imports
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, DateTime
 from sqlalchemy.sql import func
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import relationship
@@ -16,6 +16,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     coins = Column(Integer, default=0)
+    
+    is_active = Column(Boolean, default=True)
 
 class StudySession(Base):
     __tablename__ = "study_sessions"
@@ -41,9 +43,9 @@ class Gift(Base):
     gift_type = Column(String, nullable=False)
     cost = Column(Integer, nullable=False)
     
-    timestamp = Column(
+    created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc)
+        server_default=func.now()
     )
     
     sender = relationship("User", foreign_keys=[from_user_id])
