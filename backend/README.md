@@ -15,10 +15,23 @@ Backend service for a virtual silent study space inspired by Korean study cafés
 - PostgreSQL
 - SQLAlchemy
 
-## Running locally
-1. Create virtual environment
-2. Install dependencies:
-   pip install -r requirements.txt
-3. Run server:
-   uvicorn main:app --reload
+## Running with Docker (recommended)
 
+From the project root:
+```bash
+docker compose up --build
+```
+
+API will be at `http://localhost:8000` and interactive docs at `http://localhost:8000/docs`.
+
+## Running locally
+
+1. Create virtual environment and install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Make sure PostgreSQL is running with a `corner_table` database, then:
+   ```bash
+   uvicorn main:app --reload
+   ```
+   Set `DATABASE_URL` env var if your Postgres credentials differ from the default (`postgres/postgres`).

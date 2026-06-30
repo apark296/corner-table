@@ -1,7 +1,7 @@
 # schemas/gift.py
 
 # import
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 class GiftCreateRequest(BaseModel):
@@ -14,10 +14,9 @@ class GiftCreateResponse(BaseModel):
     remaining_coins: int
 
 class GiftResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     from_user_id: int
     to_user_id: int
     gift_type: str
-    
-    class Config:
-        orm_mode = True

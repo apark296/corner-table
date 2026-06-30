@@ -94,7 +94,7 @@ def get_user_state(user_id: int):
         ).first()
         
         return {
-            "user_id": user.id,
+            "id": user.id,
             "coins": user.coins,
             "is_studying": active_session is not None,
             "active_session": {

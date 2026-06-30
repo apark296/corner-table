@@ -1,5 +1,5 @@
 const API_URL = __DEV__
-  ? "http://172.20.10.11:8000"
+  ? "http://localhost:8000"
   : "https://your-api.com";
 
 // const API_URL = "http://127.0.0.1:8000";
@@ -79,7 +79,16 @@ export type SendGiftResponse = {
   success: boolean;
 }; 
 
+export type UserCreateResponse = {
+  id: number;
+  name: string;
+  coins: number;
+};
+
 export const api = {
+  createUser: (name: string) =>
+    request<UserCreateResponse>(`/users?name=${encodeURIComponent(name)}`, { method: "POST" }),
+
   getTables: () => request<Table[]>("/tables"),
 
   getUser: (userId: number): Promise<UserState> =>

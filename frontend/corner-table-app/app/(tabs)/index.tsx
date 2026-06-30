@@ -1,17 +1,30 @@
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Alert, TextInput, Platform } from "react-native";
 import { useEffect, useState } from "react";
-import { TextInput } from "react-native";
 import { api, Gift, Table } from "../../services/api";
 
-const API_URL = __DEV__
-? "http://172.20.10.11:8000"
-: "https://your-api.com";
+const showError = (message: string) => {
+  if (Platform.OS === "web") {
+    window.alert(`Error: ${message}`);
+  } else {
+    Alert.alert("Error", message);
+  }
+};
 
-const showError = (message: string) =>
-  Alert.alert("Error", message);
+const showMessage = (title: string, message?: string) => {
+  if (Platform.OS === "web") {
+    window.alert(message ? `${title}: ${message}` : title);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 
 export default function HomeScreen() {
-  const [userId, setUserId] = useState(1);
+  const [userId, setUserId] = useState<number | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const [idInput, setIdInput] = useState("");
+  const [loginMode, setLoginMode] = useState<"create" | "login">("create");
+  const [creatingAccount, setCreatingAccount] = useState(false);
+
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
   const [isStudying, setIsStudying] = useState(false);
@@ -23,14 +36,8 @@ export default function HomeScreen() {
   const [gifts, setGifts] = useState<Gift[]>([]);
   const [lastSeenGiftCount, setLastSeenGiftCount] = useState(0);
   const hasNewGifts = gifts.length > lastSeenGiftCount;
-  const markGiftsAsSeen = () => {
-    setLastSeenGiftCount(gifts.length);
-  };
+  const markGiftsAsSeen = () => setLastSeenGiftCount(gifts.length);
 
-
-
-
-  // Fetch tables from backend
   const fetchTables = async () => {
     try {
       const data = await api.getTables();
@@ -40,72 +47,93 @@ export default function HomeScreen() {
     }
   };
 
-  const refreshUserSession = async () => {
-  try {
-    const user = await api.getUser(userId);
-    setIsStudying(user.is_studying);
-    setCoins(user.coins);
+  const refreshUserSession = async (uid: number) => {
+    try {
+      const user = await api.getUser(uid);
+      setIsStudying(user.is_studying);
+      setCoins(user.coins);
 
-    const sessions = await api.getActiveSessions();
-    console.log("sessions:", sessions);
-    const mySession = Array.isArray(sessions)
-  ? sessions.find(s => s.user_id === userId)
-  : null;
+      const sessions = await api.getActiveSessions();
+      const mySession = Array.isArray(sessions)
+        ? sessions.find(s => s.user_id === uid)
+        : null;
+      setSessionId(mySession ? mySession.session_id : null);
+    } catch (err) {
+      showError("Failed to fetch user/session info");
+    }
+  };
 
-    // const mySession = sessions.find(s=> s.user_id === userId);
-    setSessionId(mySession ? mySession.session_id : null);
-  } catch (err) {
-    showError("Failed to fetch user/session info");
-  }
-};
+  const fetchGifts = async (uid: number) => {
+    try {
+      const data = await api.getReceivedGifts(uid);
+      setGifts(data);
+    } catch (err: any) {
+      showError("Failed to fetch gifts");
+    }
+  };
 
-  // Combined refresh
-  const refreshAll = async (isInitial = false) => {
+  const refreshAll = async (uid: number, isInitial = false) => {
     if (actionLoading) return;
-
     if (isInitial) setLoading(true);
-
     await fetchTables();
-    await refreshUserSession();
-    await fetchGifts();
-
+    await refreshUserSession(uid);
+    await fetchGifts(uid);
     if (isInitial) setLoading(false);
   };
 
-
-  // Polling to keep UI in sync
   useEffect(() => {
-    refreshAll(true);
-    fetchGifts()
-
-    const interval = setInterval(() => {
-      refreshAll(false);
-    }, 5000);
-
+    if (!userId) return;
+    refreshAll(userId, true);
+    const interval = setInterval(() => refreshAll(userId, false), 5000);
     return () => clearInterval(interval);
   }, [userId]);
 
-
-  // Start a session
-  const startSession = async (tableId: number) => {
-    if (isStudying) {
-      Alert.alert("Already studying", "You have an active session.");
+  const handleCreateAccount = async () => {
+    if (!nameInput.trim()) {
+      showError("Please enter your name.");
       return;
     }
+    setCreatingAccount(true);
+    try {
+      const user = await api.createUser(nameInput.trim());
+      setUserId(user.id);
+    } catch (err: any) {
+      showError(err.message || "Failed to create account");
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
 
+  const handleLogin = async () => {
+    const id = Number(idInput);
+    if (!id) {
+      showError("Please enter a valid user ID.");
+      return;
+    }
+    setCreatingAccount(true);
+    try {
+      await api.getUser(id);
+      setUserId(id);
+    } catch (err: any) {
+      showError("User not found.");
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
+
+  const startSession = async (tableId: number) => {
+    if (!userId) return;
+    if (isStudying) {
+      showMessage("Already studying", "You have an active session.");
+      return;
+    }
     setActionLoading(true);
     setIsStudying(true);
-
-    setTables(prev =>
-      prev.map(t => 
-        t.table_id === tableId ? { ...t, occupied: true } : t
-        )
-    );
-
+    setTables(prev => prev.map(t => t.table_id === tableId ? { ...t, occupied: true } : t));
     try {
-      const data = await api.startSession(userId, tableId)
+      const data = await api.startSession(userId, tableId);
       setSessionId(data.session_id);
-      await refreshAll();
+      await refreshAll(userId);
     } catch (err: any) {
       showError(err.message || "Failed to start session");
       setIsStudying(false);
@@ -115,17 +143,13 @@ export default function HomeScreen() {
     }
   };
 
-  // End a session
   const endSession = async () => {
-    if (!sessionId) return;
-
+    if (!sessionId || !userId) return;
     setActionLoading(true);
-    // Optimistic UI
     setIsStudying(false);
-
     try {
       await api.endSession(sessionId);
-      await refreshAll();
+      await refreshAll(userId);
     } catch (err: any) {
       showError(err.message);
       setIsStudying(true);
@@ -135,45 +159,99 @@ export default function HomeScreen() {
     }
   };
 
-  const sendGift = async() => {
-    console.log("Sending gift request");
+  const sendGift = async () => {
+    if (!userId) return;
     if (!giftUserId || !giftType) {
-      Alert.alert("Missing info", "Please enter recipient and gift type.");
+      showError("Please enter recipient and gift type.");
       return;
     }
-
     if (actionLoading) return;
     setActionLoading(true);
-
     try {
       await api.sendGift({
         from_user_id: userId,
         to_user_id: Number(giftUserId),
         gift_type: giftType,
       });
-
       setGiftUserId("");
       setGiftType("");
-
-      await fetchGifts();
-      await refreshUserSession();
-
-      Alert.alert("Gift sent!", `You sent a ${giftType}`);
+      await fetchGifts(userId);
+      await refreshUserSession(userId);
+      showMessage("Gift sent!", `You sent a ${giftType}`);
     } catch (err: any) {
-      Alert.alert("Error", err.message);
+      showError(err.message);
     } finally {
       setActionLoading(false);
     }
   };
 
-  const fetchGifts = async () => {
-    try {
-      const data = await api.getReceivedGifts(userId);
-      setGifts(data);
-    } catch (err: any) {
-      showError("Failed to fetch gifts");
-    }
-  };
+  if (!userId) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Corner Table</Text>
+
+        <View style={styles.modeToggle}>
+          <TouchableOpacity
+            style={[styles.modeButton, loginMode === "create" && styles.modeButtonActive]}
+            onPress={() => setLoginMode("create")}
+          >
+            <Text style={[styles.modeButtonText, loginMode === "create" && styles.modeButtonTextActive]}>
+              New account
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeButton, loginMode === "login" && styles.modeButtonActive]}
+            onPress={() => setLoginMode("login")}
+          >
+            <Text style={[styles.modeButtonText, loginMode === "login" && styles.modeButtonTextActive]}>
+              Log in
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {loginMode === "create" ? (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Your name"
+              value={nameInput}
+              onChangeText={setNameInput}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleCreateAccount}
+              disabled={creatingAccount}
+            >
+              <Text style={styles.primaryButtonText}>
+                {creatingAccount ? "Creating..." : "Create Account"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="Your user ID"
+              keyboardType="numeric"
+              value={idInput}
+              onChangeText={setIdInput}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleLogin}
+              disabled={creatingAccount}
+            >
+              <Text style={styles.primaryButtonText}>
+                {creatingAccount ? "Logging in..." : "Log In"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -186,19 +264,10 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Corner Table</Text>
-      <Text style={styles.coins}>🪙 {coins} coins</Text>
-
-      <View style={styles.userSwitch}>
-        <TouchableOpacity onPress={() => setUserId(1)}>
-          <Text style={userId === 1 ? styles.activeUser : styles.user}>
-            User 1
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setUserId(2)}>
-          <Text style={userId === 2 ? styles.activeUser : styles.user}>
-            User 2
-          </Text>
+      <View style={styles.topBar}>
+        <Text style={styles.coins}>🪙 {coins} coins · User {userId}</Text>
+        <TouchableOpacity onPress={() => setUserId(null)}>
+          <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </View>
 
@@ -209,12 +278,7 @@ export default function HomeScreen() {
             disabled={table.occupied || isStudying || actionLoading}
             onPress={() => startSession(table.table_id)}
           >
-            <View
-              style={[
-                styles.table,
-                table.occupied ? styles.occupied : styles.free,
-              ]}
-            >
+            <View style={[styles.table, table.occupied ? styles.occupied : styles.free]}>
               <Text style={styles.tableText}>{table.table_id}</Text>
             </View>
           </TouchableOpacity>
@@ -222,18 +286,13 @@ export default function HomeScreen() {
       </View>
 
       {isStudying && (
-        <TouchableOpacity 
-        style={styles.endButton} 
-        onPress={endSession}
-        disabled={actionLoading}
-        >
+        <TouchableOpacity style={styles.endButton} onPress={endSession} disabled={actionLoading}>
           <Text style={styles.endButtonText}>End Session</Text>
         </TouchableOpacity>
       )}
 
       <View style={styles.giftBox}>
         <Text style={styles.giftTitle}>Send a gift</Text>
-
         <TextInput
           style={styles.input}
           placeholder="Recipient user ID"
@@ -241,14 +300,12 @@ export default function HomeScreen() {
           value={giftUserId}
           onChangeText={setGiftUserId}
         />
-
         <TextInput
           style={styles.input}
           placeholder="Gift type (e.g. coffee)"
           value={giftType}
           onChangeText={setGiftType}
         />
-
         <TouchableOpacity style={styles.giftButton} onPress={sendGift}>
           <Text style={styles.giftButtonText}>Send Gift (5 coins)</Text>
         </TouchableOpacity>
@@ -256,7 +313,6 @@ export default function HomeScreen() {
 
       <View style={styles.giftHeader}>
         <Text style={styles.giftTitle}>Received gifts</Text>
-
         {hasNewGifts && (
           <View style={styles.newBadge}>
             <Text style={styles.newBadgeText}>NEW</Text>
@@ -266,15 +322,10 @@ export default function HomeScreen() {
 
       <TouchableOpacity onPress={markGiftsAsSeen}>
         <View style={styles.giftBox}>
-          <Text style={styles.giftTitle}>Received gifts</Text>
-
           {!Array.isArray(gifts) || gifts.length === 0 ? (
             <Text style={styles.empty}>No gifts yet</Text>
           ) : (
-            gifts
-            .slice()
-            .reverse()
-            .map((g, i) => (
+            gifts.slice().reverse().map((g, i) => (
               <Text key={i} style={styles.giftItem}>
                 {g.gift_type} from User {g.from_user_id}
               </Text>
@@ -301,44 +352,47 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: "600",
-    marginBottom: 20,
+    marginBottom: 8,
     textAlign: "center",
   },
-
-  userSwitch: {
-  flexDirection: "row",
-  justifyContent: "center",
-  gap: 20,
-  marginBottom: 10,
-  },
-  user: {
+  subtitle: {
     fontSize: 16,
     color: "#6b7280",
+    textAlign: "center",
+    marginBottom: 24,
   },
-  activeUser: {
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  coins: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#2563eb",
+    color: "#374151",
   },
-
+  logoutText: {
+    fontSize: 14,
+    color: "#9ca3af",
+  },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 8,
   },
   table: {
-    width: "22%",
-    aspectRatio: 1,
+    width: 72,
+    height: 72,
     borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
   },
   free: {
-    backgroundColor: "#d1fae5",
+    backgroundColor: "#4ade80",
   },
   occupied: {
-    backgroundColor: "#fee2e2",
+    backgroundColor: "#f87171",
   },
   tableText: {
     fontSize: 16,
@@ -356,14 +410,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-
-  coins: {
-  fontSize: 16,
-  textAlign: "center",
-  marginBottom: 12,
-  color: "#374151",
-  },
-
   giftBox: {
     marginTop: 24,
     padding: 16,
@@ -382,6 +428,42 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
   },
+  modeToggle: {
+    flexDirection: "row",
+    backgroundColor: "#f3f4f6",
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 20,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  modeButtonActive: {
+    backgroundColor: "#fff",
+  },
+  modeButtonText: {
+    fontSize: 14,
+    color: "#6b7280",
+    fontWeight: "500",
+  },
+  modeButtonTextActive: {
+    color: "#111827",
+  },
+  primaryButton: {
+    backgroundColor: "#2563eb",
+    paddingVertical: 14,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  primaryButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   giftButton: {
     backgroundColor: "#16a34a",
     paddingVertical: 12,
@@ -393,7 +475,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-
   giftItem: {
     fontSize: 14,
     marginTop: 4,
@@ -402,24 +483,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#9ca3af",
   },
-
   giftHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    marginTop: 24,
   },
-
   newBadge: {
     backgroundColor: "#ef4444",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
-
   newBadgeText: {
     color: "#fff",
     fontSize: 10,
     fontWeight: "700",
   },
-
 });
